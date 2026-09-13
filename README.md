@@ -84,15 +84,16 @@ The primary interface for building, training, and evaluating networks. Supports:
 Because layers are added dynamically, different architectures can be tested without modifying the framework:
 
 ```python
-model = NeuralNetwork(input_size=784)
+model = NeuralNetwork(n_features=784,
+                      task= "MultiClassifier")
 
-model.add_layer(64, "ReLU", hidden_init, bias=True)
-model.add_layer(32, "ReLU", hidden_init, bias=True)
-model.add_layer(16, "ReLU", hidden_init, bias=True)
-model.add_layer(10, "Softmax", output_init, bias=True)
+model.add_layer(64, "ReLU", hidden_init, normalize=True)
+model.add_layer(32, "ReLU", hidden_init, normalize=True)
+model.add_layer(16, "ReLU", hidden_init, normalize=True)
+model.add_layer(10, "Softmax", output_init, normalize=True)
 
-model.set_optimizer(Adam(learning_rate=0.001))
-model.fit(X_train, y_train, epochs=100, batch_size=32)
+model.set_optimizer("Adam")
+model.fit(X_train, y_train, epoch=100, batch_size=32)
 
 predictions = model.predict(X_test)
 accuracy, loss = model.evaluate(X_test, y_test)
