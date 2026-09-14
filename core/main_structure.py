@@ -58,7 +58,9 @@ class NeuralNetwork():
                   activation: Literal["ReLU", "Sigmoid", "Tanh", "Softmax", "None"],
                   kernel_init: Literal["He" ,"Xavier"],
                   normalize: bool=False,
-                  dropout_rate: float=0.0) -> None:
+                  dropout_rate: float=0.0,
+                  l1_reg: float=0.0,
+                  l2_reg: float=0.0) -> None:
         """
         Adds layer with given details to the network sequentially\n
         -------------------------------------------------------------\n
@@ -71,13 +73,20 @@ class NeuralNetwork():
         self._layers.append(Layer(
             n_neurons=n_neuron,
             fan_in=last_n_neuron,
+            
             activation_function=activation,
             kernel_initialization=kernel_init,
             learning_rate=self._a,
+            
             random_state=self.random_state,
+            
             normalize=normalize,
-            dropout_rate=dropout_rate
-                                 ))
+            
+            dropout_rate=dropout_rate,
+            
+            l1=l1_reg,
+            l2=l2_reg
+            ))
         
         self.previous_a = n_neuron
         
@@ -238,7 +247,15 @@ class NeuralNetwork():
             #Bias gradients
             dL_db = np.sum(dL_dZ, axis=1, keepdims=True)
             
-            #If there is a previous layer: calculate dl/da (just we did in first )
+            # Adding regularization penalty
+            m_samples = dL_dZ.shape[1]
+            if layer.l1 > 0.0:    
+                dL_dW += (layer.l1 / m_samples) * np.sign(layer._W)
+                
+            if layer.l2 > 0.0:
+                dL_dW += (layer.l2 / m_samples) * layer._W
+            
+            #If there is a previous layer: calculate dl/da_incoming (just we did in first )
             if layer_idx > 0:  
                 dL_dA_incoming = layer._W.T @ dL_dZ
                 

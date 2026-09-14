@@ -31,6 +31,8 @@ class Layer():
                  random_state = None,
                  normalize: bool=False,
                  dropout_rate: float=0.0,
+                 l1: float=0.0,
+                 l2: float=0.0,
                  epsilon: float=0.0001,
                  p: float=0.99):
         self._act_func = activation_function
@@ -45,6 +47,9 @@ class Layer():
         
         self.normalize = normalize
         self.dropout_rate = dropout_rate
+        
+        self.l1 = l1
+        self.l2 = l2
         
         self.epsilon = epsilon
         self.p = p
