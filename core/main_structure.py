@@ -57,7 +57,8 @@ class NeuralNetwork():
                   n_neuron: int,
                   activation: Literal["ReLU", "Sigmoid", "Tanh", "Softmax", "None"],
                   kernel_init: Literal["He" ,"Xavier"],
-                  normalize: bool=False) -> None:
+                  normalize: bool=False,
+                  dropout_rate: float=0.0) -> None:
         """
         Adds layer with given details to the network sequentially\n
         -------------------------------------------------------------\n
@@ -74,7 +75,8 @@ class NeuralNetwork():
             kernel_initialization=kernel_init,
             learning_rate=self._a,
             random_state=self.random_state,
-            normalize=normalize
+            normalize=normalize,
+            dropout_rate=dropout_rate
                                  ))
         
         self.previous_a = n_neuron
@@ -140,7 +142,7 @@ class NeuralNetwork():
         """
         
         #step 1: Get loss derivative (dL/dŷ)
-        dL_dA = self._get_loss_derivative(y_pred, y_true)
+        dL_dA_incoming = self._get_loss_derivative(y_pred, y_true)
         
         #step 2: Initialize storage for gradients
         gradients = []
@@ -154,6 +156,13 @@ class NeuralNetwork():
             #get cached values from forward pass
             A_prev = self.A_cache[layer_idx]  #input to this layer
             Z = self.Z_cache[layer_idx]       #pre-activation: Z = W @ A_prev + b
+            
+            if layer.dropout_rate > 0.0:
+                # Compute activation gradient through by dropout mask
+                dL_dA = dL_dA_incoming * self.dropout_cache[layer_idx] 
+            else:
+                # No dropouts!
+                dL_dA = dL_dA_incoming
             
             
             #Activation backward:
@@ -231,7 +240,7 @@ class NeuralNetwork():
             
             #If there is a previous layer: calculate dl/da (just we did in first )
             if layer_idx > 0:  
-                dL_dA = layer._W.T @ dL_dZ
+                dL_dA_incoming = layer._W.T @ dL_dZ
                 
             #Store gradients
             layer_gradient = {
@@ -272,15 +281,20 @@ class NeuralNetwork():
             self.A_cache = []
             self.Z_cache = []
             self.BN_cache = [] #List of dict caches from Batchnorm layers
+            self.dropout_cache = []
         
         n_layers = len(self._layers)
         for layer_ind in range(n_layers):
             if compute_gradients:
                 self.A_cache.append(previous_a)
                 
-                z, previous_a, batchnorm_cache = self._layers[layer_ind].forward(previous_a, cache=True)
+                z, previous_a, batchnorm_cache, drpout_cache = self._layers[layer_ind].forward(previous_a, cache=True)
+                
+                #Store caches
                 self.Z_cache.append(z)
                 self.BN_cache.append(batchnorm_cache)
+                self.dropout_cache.append(drpout_cache)
+
                 
             else:
                 previous_a = self._layers[layer_ind].forward(previous_a, cache=False)
@@ -349,8 +363,9 @@ class NeuralNetwork():
                 loss = self.evaluater._get_loss(Y_hat, Y_batch)
                 loss_sum += loss * Y_batch.shape[1]
                 
-                #Calulating gradients and updating parameters (W and b)
+                #Calulating gradients and updating parameters
                 gradients = self._back_propagate(Y_hat, Y_batch)
+                
                 self._gradient_descent(gradients)
                 
             #monitoring loss 

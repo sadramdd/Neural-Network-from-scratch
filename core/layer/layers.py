@@ -30,6 +30,7 @@ class Layer():
                  learning_rate: float=0.01,
                  random_state = None,
                  normalize: bool=False,
+                 dropout_rate: float=0.0,
                  epsilon: float=0.0001,
                  p: float=0.99):
         self._act_func = activation_function
@@ -43,6 +44,7 @@ class Layer():
         self._initialize_weights(fan_in, n_neurons, kernel_initialization)
         
         self.normalize = normalize
+        self.dropout_rate = dropout_rate
         
         self.epsilon = epsilon
         self.p = p
@@ -133,6 +135,9 @@ class Layer():
     def forward(self,
                 A: ArrayLike,
                 cache: bool):
+        # Two caches needed for backpropagation
+        batchnorm_cache =None
+        dropout_mask = None
         
         z = self._W @ A + self._b
         if self.normalize:
@@ -140,10 +145,16 @@ class Layer():
             
         a = self._call_activation(self._act_func, z)
         
+        #If layer has dropout
+        if self.dropout_rate > 0.0:
+            survival_rate = 1 -self.dropout_rate
+            
+            random_matrix = np.random.binomial(1, survival_rate, a.shape)
+            dropout_mask = random_matrix / survival_rate
+            
+            a = a * dropout_mask # A_dropout
+        
         if cache:
-            if self.normalize:
-                return z, a, batchnorm_cache
-            else:
-                return z, a, None
+                return z, a, batchnorm_cache, dropout_mask
 
         return a
