@@ -112,20 +112,21 @@ class Optimizer():
         new_biases = list()
         
         new_reg_paramters = dict()
-        for c ,(gradients_l, weight, bias) in enumerate( zip(gradients, self.weights, self.biases) ):
-            
-            new_weight = weight - (self.learning_rate * gradients_l["dW"])
-            new_bias = bias - (self.learning_rate * gradients_l["db"])
-            
-            #If this layer has batchnorm, update gamma and beta
-            if c in self.reg_parameters:
+        for c, (grads, weight, bias) in enumerate(zip(gradients, self.weights, self.biases)):
+            new_weight, new_bias = weight, bias          # default: unchanged
+
+            if weight is not None and "dW" in grads:
+                new_weight = weight - self.learning_rate * grads["dW"]
+            if bias is not None and "db" in grads:
+                new_bias = bias - self.learning_rate * grads["db"]
+
+            if c in self.reg_parameters and {"dgamma", "dbeta"} <= grads.keys():
                 gamma, beta = self.reg_parameters[c]
-                new_gamma = gamma - (self.learning_rate * gradients_l["dgamma"])
-                new_beta  = beta - (self.learning_rate * gradients_l["dbeta"])
-                
-                new_reg_paramters[c] = (new_gamma, new_beta)
-            
-            
+                new_reg_paramters[c] = (
+                    gamma - self.learning_rate * grads["dgamma"],
+                    beta - self.learning_rate * grads["dbeta"],
+                )
+
             new_weights.append(new_weight)
             new_biases.append(new_bias)
         
@@ -138,62 +139,67 @@ class Optimizer():
         
         new_reg_paramters = dict()
         #Calculate new velocity W and b, according to gradients, previous velocity and Beta (Hyperparameter)
-        for c, (gradients_l, weights_l , bias_l, velocity_dict_l) in enumerate(
+        for c, (grads, weight , bias, velocity_dict_l) in enumerate(
                 zip(gradients,self.weights,self.biases,self.velocity)
         ):
-            
-            #Update velocity
-            self.velocity[c]["vW"] = (self.b1 * velocity_dict_l["vW"]) + (1 - self.b1) * gradients_l["dW"]
-            self.velocity[c]["vb"] = (self.b1 * velocity_dict_l["vb"]) + (1 - self.b1) * gradients_l["db"]
-            
-            #Update parameters
-            new_w = weights_l - self.learning_rate * self.velocity[c]["vW"]
-            new_b = bias_l - self.learning_rate * self.velocity[c]["vb"]
+            new_weight, new_bias = weight, bias          # default: unchanged
+            if weight is not None and "dW" in grads:
+                self.velocity[c]["vW"] = (self.b1 * velocity_dict_l["vW"]) + (1 - self.b1) * grads["dW"]
+                new_weight = weight - self.learning_rate * self.velocity[c]["vW"]
+                
+            if bias is not None and "db" in grads:
+                self.velocity[c]["vb"] = (self.b1 * velocity_dict_l["vb"]) + (1 - self.b1) * grads["db"]
+                new_bias = bias - self.learning_rate * self.velocity[c]["vb"]
             
             #If this layer has batchnorm, update gamma and beta
             if c in self.reg_parameters:
                 gamma, beta = self.reg_parameters[c]
                 
                 #Update gamma and beta velocity
-                self.velocity[c]["vGamma"] = (self.b1 * velocity_dict_l["vGamma"]) + (1 - self.b1) * gradients_l["dgamma"]
-                self.velocity[c]["vbeta"] = (self.b1 * velocity_dict_l["vbeta"]) + (1 - self.b1) * gradients_l["dbeta"]
+                self.velocity[c]["vGamma"] = (self.b1 * velocity_dict_l["vGamma"]) + (1 - self.b1) * grads["dgamma"]
+                self.velocity[c]["vbeta"] = (self.b1 * velocity_dict_l["vbeta"]) + (1 - self.b1) * grads["dbeta"]
                 
                 new_gamma = gamma - (self.learning_rate * self.velocity[c]["vGamma"])
                 new_beta  = beta - (self.learning_rate * self.velocity[c]["vbeta"])
                 
                 new_reg_paramters[c] = (new_gamma, new_beta)
             
-            new_weights.append(new_w)
-            new_biases.append(new_b)
+            new_weights.append(new_weight)
+            new_biases.append(new_bias)
             
         return new_weights, new_biases, new_reg_paramters
         
     def _rmsprop(self,
-                 gradients: list):
+                 gradients):
         #Update accumulated squares for weigths
         new_weights = list()
         new_biases = list()
         
         new_reg_parameters = dict()
         
-        for c, (gradients_l, weights_l, bias_l, accumulates_dict_l) in enumerate(
+        for c, (gradients, weight, bias, accumulates_dict_l) in enumerate(
             zip(gradients, self.weights, self.biases, self.accumulates)
         ):
-            #Update accumulations
-            self.accumulates[c]["W_accumulated"] = (np.multiply(self.b2, accumulates_dict_l["W_accumulated"]) 
-                                + (1 -  self.b2)
-                                * np.square(gradients_l["dW"]))
-            self.accumulates[c]["b_accumulated"] = (np.multiply(self.b2, accumulates_dict_l["b_accumulated"]) 
-                                + (1 - self.b2)
-                                * np.square(gradients_l["db"]))
+            new_weight, new_bias = weight, bias # default: unchanged
             
-            #Update parameters
-            new_w = (weights_l 
-                    - np.divide( self.learning_rate, np.sqrt(self.accumulates[c]["W_accumulated"] + self.e) )
-                    * gradients_l["dW"])
-            new_b= (bias_l 
-                    - np.divide( self.learning_rate, np.sqrt(self.accumulates[c]["b_accumulated"] + self.e) )
-                    * gradients_l["db"])
+            if weight is not None and "dW" in gradients:
+                #Update accumulations
+                self.accumulates[c]["W_accumulated"] = (np.multiply(self.b2, accumulates_dict_l["W_accumulated"]) 
+                                    + (1 -  self.b2)
+                                    * np.square(gradients["dW"]))
+                #Update parameters
+                new_weight = (weight 
+                        - np.divide( self.learning_rate, np.sqrt(self.accumulates[c]["W_accumulated"] + self.e) )
+                        * gradients["dW"])
+                
+            if bias is not None and "db" in gradients:
+                self.accumulates[c]["b_accumulated"] = (np.multiply(self.b2, accumulates_dict_l["b_accumulated"]) 
+                                    + (1 - self.b2)
+                                    * np.square(gradients["db"]))
+                
+                new_bias = (weight 
+                        - np.divide( self.learning_rate, np.sqrt(self.accumulates[c]["b_accumulated"] + self.e) )
+                        * gradients["db"])
             
             #If this layer has batchnorm, update gamma and beta
             if c in self.reg_parameters:
@@ -202,32 +208,32 @@ class Optimizer():
                 #Update gamma and beta accumulation
                 self.accumulates[c]["g_accumulated"] = ( (self.b2 * accumulates_dict_l["g_accumulated"]) 
                                                         + 
-                                                        (1 - self.b2) * np.square(gradients_l["dgamma"]) )
+                                                        (1 - self.b2) * np.square(gradients["dgamma"]) )
                 
                 self.accumulates[c]["beta_accumulated"] = ( (self.b2 * accumulates_dict_l["beta_accumulated"]) 
                                                           + 
                                                           (1 - self.b2)
-                                                          * np.square(gradients_l["dbeta"]))
+                                                          * np.square(gradients["dbeta"]))
                 
                 #Update parameters 
                 
                 new_gamma = (
                     gamma
                     - self.learning_rate
-                    * gradients_l["dgamma"]
+                    * gradients["dgamma"]
                     / np.sqrt(self.accumulates[c]["g_accumulated"] + self.e)
                 )
                 new_beta = (
                     beta
                     - self.learning_rate
-                    * gradients_l["dbeta"]
+                    * gradients["dbeta"]
                     / np.sqrt(self.accumulates[c]["beta_accumulated"] + self.e)
                 )
                 
                 new_reg_parameters[c] = (new_gamma, new_beta)
             
-            new_weights.append(new_w)
-            new_biases.append(new_b)
+            new_weights.append(new_weight)
+            new_biases.append(new_bias)
         
         return new_weights, new_biases, new_reg_parameters
     
@@ -241,46 +247,54 @@ class Optimizer():
         
         new_reg_paramters = dict()
         
-        for c, (gradients_dict, weights, bias, velocity ,accumulates_dict) in enumerate(
+        for c, (gradients_dict, weight, bias, velocity ,accumulates_dict) in enumerate(
             zip(gradients, self.weights, self.biases, self.velocity ,self.accumulates)
         ):
-            #Update First moment: momentum (m)
-            self.velocity[c]["vW"] = (np.multiply(self.b1, velocity["vW"])
-                    + (1 -  self.b1)
-                    * gradients_dict["dW"])  
-            self.velocity[c]["vb"] = (np.multiply(self.b1, velocity["vb"])
-                    + (1 -  self.b1)
-                    * gradients_dict["db"])
+            new_weight, new_bias = weight, bias # default: unchanged
             
-            #Update Second moment: variance (v)
-            self.accumulates[c]["W_accumulated"] = (np.multiply(self.b2, accumulates_dict["W_accumulated"])
-                    + (1 - self.b2)
-                    * np.square(gradients_dict["dW"]))
-            self.accumulates[c]["b_accumulated"] = (np.multiply(self.b2, accumulates_dict["b_accumulated"])
-                    + (1 - self.b2)
-                    * np.square(gradients_dict["db"]))
+            if weight is not None and "dW" in gradients:
+                #Update First moment: momentum (m)
+                self.velocity[c]["vW"] = (np.multiply(self.b1, velocity["vW"])
+                        + (1 -  self.b1)
+                        * gradients_dict["dW"]) 
+                #Update Second moment: variance (v)
+                self.accumulates[c]["W_accumulated"] = (np.multiply(self.b2, accumulates_dict["W_accumulated"])
+                        + (1 - self.b2)
+                        * np.square(gradients_dict["dW"]))
+                
+                w_s_hat = np.divide(self.accumulates[c]["W_accumulated"], 1 - np.power(self.b2, self.t))
+                
+                w_m_hat = np.divide(self.velocity[c]["vW"], 1 - np.power(self.b1, self.t))
             
-            #Calculate s hats for calculation
-            w_s_hat = np.divide(self.accumulates[c]["W_accumulated"], 1 - np.power(self.b2, self.t))
-            b_s_hat = np.divide(self.accumulates[c]["b_accumulated"], 1 - np.power(self.b2, self.t))
-            
-            #Calculate v hats for calculation
-            w_m_hat = np.divide(self.velocity[c]["vW"], 1 - np.power(self.b1, self.t))
-            b_m_hat = np.divide(self.velocity[c]["vb"], 1 - np.power(self.b1, self.t))
-            
-            #Update parameters
-            new_w = (weights
+                #Update parameters
+                new_weight = (weight
                         - self.learning_rate
                         * w_m_hat
                         / np.sqrt(w_s_hat + self.e))
-            
-            new_b = (bias
-                        - self.learning_rate
-                        * b_m_hat
-                        / np.sqrt(b_s_hat + self.e))
-            
-            new_weights.append(new_w)
-            new_biases.append(new_b)
+            else:
+                self.velocity[c]["vb"] = (np.multiply(self.b1, velocity["vb"])
+                        + (1 -  self.b1)
+                        * gradients_dict["db"])
+                
+
+                self.accumulates[c]["b_accumulated"] = (np.multiply(self.b2, accumulates_dict["b_accumulated"])
+                        + (1 - self.b2)
+                        * np.square(gradients_dict["db"]))
+                
+                #Calculate s hats for calculation
+                
+                b_s_hat = np.divide(self.accumulates[c]["b_accumulated"], 1 - np.power(self.b2, self.t))
+                
+                #Calculate v hats for calculation
+                b_m_hat = np.divide(self.velocity[c]["vb"], 1 - np.power(self.b1, self.t))
+                
+                new_bias = (bias
+                            - self.learning_rate
+                            * b_m_hat
+                            / np.sqrt(b_s_hat + self.e))
+                
+            new_weights.append(new_weight)
+            new_biases.append(new_bias)
             
             #If this layer has batchnorm, update its gamma/beta velocities/accumulations and update
             if c in self.reg_parameters:
