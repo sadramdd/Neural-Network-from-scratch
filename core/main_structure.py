@@ -54,42 +54,15 @@ class NeuralNetwork():
         
     #User uses this method to add layers one by one
     def add_layer(self,
-                  n_neuron: int,
-                  activation: Literal["ReLU", "Sigmoid", "Tanh", "Softmax", "None"],
-                  kernel_init: Literal["He" ,"Xavier"],
-                  normalize: bool=False,
-                  dropout_rate: float=0.0,
-                  l1_reg: float=0.0,
-                  l2_reg: float=0.0) -> None:
+                  layer) -> None:
         """
-        Adds layer with given details to the network sequentially\n
+        Adds the given layer class into the network sequentially\n
         -------------------------------------------------------------\n
-        `n_neuron`: how many neurons this layer has\n
-        `activation`: what activation this layer uses
+        `layer`: The initialized layer class
         """
+        self.previous_a = layer.build(shape_in=self.previous_a) #Actually initializes parameters, returns fan_out
         
-        last_n_neuron = self.previous_a
-        
-        self._layers.append(Layer(
-            n_neurons=n_neuron,
-            fan_in=last_n_neuron,
-            
-            activation_function=activation,
-            kernel_initialization=kernel_init,
-            learning_rate=self._a,
-            
-            random_state=self.random_state,
-            
-            normalize=normalize,
-            
-            dropout_rate=dropout_rate,
-            
-            l1=l1_reg,
-            l2=l2_reg
-            ))
-        
-        self.previous_a = n_neuron
-        
+        self._layers.append(layer)
     def set_optimizer(self,
                       optimizer: Literal["SGD", "Momentum", "RMSProp", "Adam"]):
         """
@@ -104,12 +77,12 @@ class NeuralNetwork():
         """
         
         #Store models weights in a flat list in oder to send it to the Optimizer
-        weights = [layer._W for layer in self._layers]
-        biases =  [layer._b for layer in self._layers]
+        weights = [getattr(layer, "_W", None) for layer in self._layers]
+        biases =  [getattr(layer, "_b", None) for layer in self._layers]
         reg_parameters = {
                         c: (layer._gamma, layer._beta)
                         for c, layer in enumerate(self._layers)
-                        if layer.normalize
+                        if getattr(layer, "normalize", False)
                         }
                 
         #Initialize Save the optimizer into models attributes
@@ -133,145 +106,21 @@ class NeuralNetwork():
             
     
     def _back_propagate(self, y_pred, y_true):
-        """
-        compute gradients for all layers using backpropagation
-        
-        steps:
-        1. start with dL/d_pred (loss derivative)
-        
-        2. for each layer (backwards):
-           - Compute dL/dZ = dL/dA * dA/dZ (chain rule with activation)
-           - Compute dL/dW = dL/dZ @ A_prev.T / m
-           - Compute dL/db = sum(dL/dZ) / m
-           - Compute dL/dA_prev = W.T @ dL/dZ (for next iteration)
-        
-        returns:
-            list of dicts: gradients for each layer
-                {'dW': dl/dW, 'db': dl/db}
-        """
-        
-        #step 1: Get loss derivative (dL/dŷ)
-        dL_dA_incoming = self._get_loss_derivative(y_pred, y_true)
-        
-        #step 2: Initialize storage for gradients
         gradients = []
-        #m_samples = y_pred.shape[1]  # number of samples
         
-        #step 3: Iterate backwards through layers
+        # Calcutate the derivative of loss
+        dA_incoming = self._get_loss_derivative(y_pred, y_true)
+        
         for layer_idx in range(len(self._layers) - 1, -1, -1):
-            #Get the layer through index
             layer = self._layers[layer_idx]
             
-            #get cached values from forward pass
-            A_prev = self.A_cache[layer_idx]  #input to this layer
-            Z = self.Z_cache[layer_idx]       #pre-activation: Z = W @ A_prev + b
+            # No need for calculating dA_incoming for first layer 
+            calculate_a = layer_idx > 0
+            dA_incoming, layer_gradient = layer.backward(dA_incoming, calculate_a=calculate_a)
+
+            layer_gradient["layer_idx"] = layer_idx
+
             
-            if layer.dropout_rate > 0.0:
-                # Compute activation gradient through by dropout mask
-                dL_dA = dL_dA_incoming * self.dropout_cache[layer_idx] 
-            else:
-                # No dropouts!
-                dL_dA = dL_dA_incoming
-            
-            
-            #Activation backward:
-            if layer._act_func == "Softmax":
-                # Special case: softmax + cross-entropy 
-                dL_dZ_bn = dL_dA
-            else:
-                activation_deriv = layer._call_activation_derivative(layer._act_func, Z)
-                dL_dZ_bn = dL_dA * activation_deriv
-                
-            #Batchnorm parameters gradients
-            if layer.normalize:
-
-                #bn_cache = layer._batchnorm_cache
-                bn_cache = self.BN_cache[layer_idx]
-
-                X_norm = bn_cache["X_norm"]
-                inv_std = bn_cache["inv_std"]
-
-                m = dL_dZ_bn.shape[1]
-
-                # gamma gradient
-                dL_dgamma = np.sum(
-                    dL_dZ_bn * X_norm,
-                    axis=1,
-                    keepdims=True
-                )
-
-                # beta gradient
-                dL_dbeta = np.sum(
-                    dL_dZ_bn,
-                    axis=1,
-                    keepdims=True
-                )
-
-                # Backprop through:
-                #
-                # Z_bn = gamma * X_norm + beta
-
-                dL_dX_norm = dL_dZ_bn * layer._gamma
-
-                # Backprop through normalization
-                dL_dZ = (
-                    inv_std / m
-                    * (
-                        m * dL_dX_norm
-                        - np.sum(
-                            dL_dX_norm,
-                            axis=1,
-                            keepdims=True
-                        )
-                        - X_norm
-                        * np.sum(
-                            dL_dX_norm * X_norm,
-                            axis=1,
-                            keepdims=True
-                        )
-                    )
-                )
-
-            else:
-
-                dL_dZ = dL_dZ_bn
-                dL_dgamma = None
-                dL_dbeta = None
-                        
-            
-            #Linear parameters gradients:
-            
-            #Weight gradients
-            dL_dW = (dL_dZ @ A_prev.T)
-            
-            #Bias gradients
-            dL_db = np.sum(dL_dZ, axis=1, keepdims=True)
-            
-            # Adding regularization penalty
-            m_samples = dL_dZ.shape[1]
-            if layer.l1 > 0.0:    
-                dL_dW += (layer.l1 / m_samples) * np.sign(layer._W)
-                
-            if layer.l2 > 0.0:
-                dL_dW += (layer.l2 / m_samples) * layer._W
-            
-            #If there is a previous layer: calculate dl/da_incoming (just we did in first )
-            if layer_idx > 0:  
-                dL_dA_incoming = layer._W.T @ dL_dZ
-                
-            #Store gradients
-            layer_gradient = {
-            "dW": dL_dW,
-            "db": dL_db,
-            "layer_idx": layer_idx
-                }
-
-            #If layer has batch normalization, also add dl_dgamma and dl_dbeta
-            if layer.normalize:
-                layer_gradient["dgamma"] = dL_dgamma
-                layer_gradient["dbeta"] = dL_dbeta
-
-            #add to gradients list (we'll reverse at the end since we went backwards)
             gradients.append(layer_gradient)
             
         # reverse because we computed in reverse order
@@ -293,30 +142,11 @@ class NeuralNetwork():
         the output (last a)
         """
         previous_a = x
-        
-        if compute_gradients:
-            self.A_cache = []
-            self.Z_cache = []
-            self.BN_cache = [] #List of dict caches from Batchnorm layers
-            self.dropout_cache = []
-        
-        n_layers = len(self._layers)
-        for layer_ind in range(n_layers):
-            if compute_gradients:
-                self.A_cache.append(previous_a)
-                
-                z, previous_a, batchnorm_cache, drpout_cache = self._layers[layer_ind].forward(previous_a, cache=True)
-                
-                #Store caches
-                self.Z_cache.append(z)
-                self.BN_cache.append(batchnorm_cache)
-                self.dropout_cache.append(drpout_cache)
+
+        for layer in self._layers:
+            previous_a = layer.forward(previous_a, cache=compute_gradients)
 
                 
-            else:
-                previous_a = self._layers[layer_ind].forward(previous_a, cache=False)
-                
-            
         return previous_a
     
     def _gradient_descent(self, gradients):
